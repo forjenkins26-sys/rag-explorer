@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from pathlib import Path
@@ -16,11 +17,21 @@ from watcher import start_watcher
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    ingest_all()
-    observer = start_watcher()
+    # Ingestion loads the embedding model (first-run download can take
+    # several minutes on a cold host). Run it in the background so uvicorn
+    # binds the port immediately — hosts like Render kill the deploy if no
+    # port opens within their scan timeout.
+    asyncio.create_task(asyncio.to_thread(_startup_ingest))
     yield
-    observer.stop()
-    observer.join()
+
+
+def _startup_ingest():
+    ingest_all()
+    global _watcher_observer
+    _watcher_observer = start_watcher()
+
+
+_watcher_observer = None
 
 
 app = FastAPI(title="RAG Explorer API", lifespan=lifespan)

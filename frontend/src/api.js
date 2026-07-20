@@ -1,4 +1,8 @@
-const BASE = "/api";
+// In dev, Vite proxies /api -> localhost:8000 (see vite.config.js). In prod
+// (Vercel static build), there's no dev-server proxy, so we need the deployed
+// backend's absolute URL, set via VITE_API_URL at build time.
+const API_ROOT = import.meta.env.VITE_API_URL || "";
+const BASE = `${API_ROOT}/api`;
 
 export async function getStatus() {
   const res = await fetch(`${BASE}/status`);
