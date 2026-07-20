@@ -9,7 +9,13 @@ Visual walkthrough of a full RAG pipeline: PDF/TXT/MD/Excel → chunk → embed 
 - **Frontend:** https://frontend-six-alpha-35.vercel.app (Vercel)
 - **Backend:** https://rag-explorer-api.onrender.com (Render, free tier)
 
-Both are real, always-on deploys — independent of any local machine.
+Both are real deploys, independent of any local machine — works whether or
+not your laptop is on.
+
+**Cold start caveat:** Render's free tier sleeps the backend after 15 min of
+no traffic. The first request after that wakes it up (~30-50s), then it's
+fast again until the next idle period. This is a free-tier behavior, not a
+bug — upgrading to a paid Render plan removes it if it matters.
 
 ## Run locally
 
