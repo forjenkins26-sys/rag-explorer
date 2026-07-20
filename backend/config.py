@@ -14,6 +14,8 @@ CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or os.getenv("GROQ_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+NOMIC_API_KEY = os.getenv("NOMIC_API_KEY", "")
+
 # Comma-separated list of allowed frontend origins. Defaults to localhost dev
 # server plus wildcard so a first deploy isn't blocked before the Vercel URL
 # is known; tighten CORS_ORIGINS once the real frontend URL is set.
@@ -23,7 +25,7 @@ CORS_ORIGINS = [o.strip() for o in _cors_env.split(",") if o.strip()] or [
     "*",
 ]
 
-EMBED_MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
+EMBED_MODEL_NAME = "nomic-embed-text-v1.5"
 COLLECTION_NAME = "rag_explorer"
 
 CHUNK_SIZE = 800

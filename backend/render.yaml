@@ -11,6 +11,8 @@ services:
         sync: false
       - key: GROQ_MODEL
         value: llama-3.3-70b-versatile
+      - key: NOMIC_API_KEY
+        sync: false
       - key: CORS_ORIGINS
         sync: false
       - key: PYTHON_VERSION

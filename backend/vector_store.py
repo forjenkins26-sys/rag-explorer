@@ -1,24 +1,25 @@
 import threading
 
-from config import CHROMA_DIR, COLLECTION_NAME, EMBED_MODEL_NAME
+from config import CHROMA_DIR, COLLECTION_NAME, EMBED_MODEL_NAME, NOMIC_API_KEY
 
-# `chromadb` and `sentence_transformers` (which pulls in torch) are both slow
-# to *import*, not just to construct — 15s+ each on a fast machine, much more
-# on a cold/shared-CPU host. That import cost must not happen at module load,
-# because module import happens before uvicorn can bind its port, and hosts
-# like Render kill a deploy that doesn't open a port within a few minutes.
-# Import both lazily, inside the first function that actually needs them.
+# `chromadb`'s import is cheap, but must still not run at module load — module
+# import happens before uvicorn can bind its port, and hosts like Render kill
+# a deploy that doesn't open a port within a few minutes. Lazy-init it inside
+# the first function that needs it.
 #
 # The background ingestion task and incoming API requests both call
-# get_collection()/get_embedder() concurrently on different threads. Chroma's
-# SQLite-backed PersistentClient crashes with "Could not connect to tenant
-# default_tenant" if two threads race to create it on a brand-new (not yet
-# initialized) data directory — so both getters are guarded by a lock.
+# get_collection() concurrently on different threads. Chroma's SQLite-backed
+# PersistentClient crashes with "Could not connect to tenant default_tenant"
+# if two threads race to create it on a brand-new (not yet initialized) data
+# directory — so it's guarded by a lock.
+#
+# Embeddings come from Nomic's hosted Atlas API (nomic.embed.text), not a
+# local sentence-transformers/torch model — torch doesn't fit free-tier host
+# RAM (512MB), confirmed by a crash-loop on Render's free plan. The hosted
+# API keeps the backend lightweight enough to deploy anywhere for free.
 _client = None
 _collection = None
-_model = None
 _collection_lock = threading.Lock()
-_model_lock = threading.Lock()
 
 
 def get_collection():
@@ -35,28 +36,49 @@ def get_collection():
     return _collection
 
 
-def get_embedder():
-    global _model
-    if _model is None:
-        with _model_lock:
-            if _model is None:
-                from sentence_transformers import SentenceTransformer
-
-                _model = SentenceTransformer(EMBED_MODEL_NAME, trust_remote_code=True)
-    return _model
+_nomic_logged_in = False
+_nomic_login_lock = threading.Lock()
 
 
-def embed(texts: list[str]) -> list[list[float]]:
-    return get_embedder().encode(texts, normalize_embeddings=True).tolist()
+def _ensure_nomic_login():
+    global _nomic_logged_in
+    if not _nomic_logged_in:
+        with _nomic_login_lock:
+            if not _nomic_logged_in:
+                import nomic
+
+                nomic.login(NOMIC_API_KEY)
+                _nomic_logged_in = True
+
+
+def _embed(texts: list[str], task_type: str) -> list[list[float]]:
+    from nomic import embed
+
+    _ensure_nomic_login()
+    result = embed.text(
+        texts=texts,
+        model=EMBED_MODEL_NAME,
+        task_type=task_type,
+        dimensionality=768,
+    )
+    return result["embeddings"]
+
+
+def embed_documents(texts: list[str]) -> list[list[float]]:
+    return _embed(texts, task_type="search_document")
+
+
+def embed_query(text: str) -> list[float]:
+    return _embed([text], task_type="search_query")[0]
 
 
 def add_chunks(ids: list[str], texts: list[str], metadatas: list[dict]) -> None:
-    embeddings = embed(texts)
+    embeddings = embed_documents(texts)
     get_collection().upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
 
 
 def query(text: str, top_k: int) -> dict:
-    embedding = embed([text])[0]
+    embedding = embed_query(text)
     return get_collection().query(
         query_embeddings=[embedding],
         n_results=top_k,
