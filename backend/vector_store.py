@@ -1,3 +1,5 @@
+import threading
+
 from config import CHROMA_DIR, COLLECTION_NAME, EMBED_MODEL_NAME
 
 # `chromadb` and `sentence_transformers` (which pulls in torch) are both slow
@@ -6,29 +8,41 @@ from config import CHROMA_DIR, COLLECTION_NAME, EMBED_MODEL_NAME
 # because module import happens before uvicorn can bind its port, and hosts
 # like Render kill a deploy that doesn't open a port within a few minutes.
 # Import both lazily, inside the first function that actually needs them.
+#
+# The background ingestion task and incoming API requests both call
+# get_collection()/get_embedder() concurrently on different threads. Chroma's
+# SQLite-backed PersistentClient crashes with "Could not connect to tenant
+# default_tenant" if two threads race to create it on a brand-new (not yet
+# initialized) data directory — so both getters are guarded by a lock.
 _client = None
 _collection = None
 _model = None
+_collection_lock = threading.Lock()
+_model_lock = threading.Lock()
 
 
 def get_collection():
     global _client, _collection
     if _collection is None:
-        import chromadb
+        with _collection_lock:
+            if _collection is None:  # re-check: another thread may have won the race
+                import chromadb
 
-        _client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        _collection = _client.get_or_create_collection(
-            name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
-        )
+                _client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+                _collection = _client.get_or_create_collection(
+                    name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
+                )
     return _collection
 
 
 def get_embedder():
     global _model
     if _model is None:
-        from sentence_transformers import SentenceTransformer
+        with _model_lock:
+            if _model is None:
+                from sentence_transformers import SentenceTransformer
 
-        _model = SentenceTransformer(EMBED_MODEL_NAME, trust_remote_code=True)
+                _model = SentenceTransformer(EMBED_MODEL_NAME, trust_remote_code=True)
     return _model
 
 
