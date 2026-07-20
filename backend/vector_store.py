@@ -1,22 +1,21 @@
-import chromadb
-from sentence_transformers import SentenceTransformer
-
 from config import CHROMA_DIR, COLLECTION_NAME, EMBED_MODEL_NAME
 
-# Both the Chroma client and the embedding model are expensive to construct
-# (Chroma client init touches disk + telemetry; the model load can take
-# minutes on a cold host downloading weights). Neither must block module
-# import — hosts like Render kill a deploy if uvicorn doesn't bind its port
-# within a few minutes, and import happens before that bind. Lazy-init both
-# on first real use instead.
+# `chromadb` and `sentence_transformers` (which pulls in torch) are both slow
+# to *import*, not just to construct — 15s+ each on a fast machine, much more
+# on a cold/shared-CPU host. That import cost must not happen at module load,
+# because module import happens before uvicorn can bind its port, and hosts
+# like Render kill a deploy that doesn't open a port within a few minutes.
+# Import both lazily, inside the first function that actually needs them.
 _client = None
 _collection = None
-_model: SentenceTransformer | None = None
+_model = None
 
 
 def get_collection():
     global _client, _collection
     if _collection is None:
+        import chromadb
+
         _client = chromadb.PersistentClient(path=str(CHROMA_DIR))
         _collection = _client.get_or_create_collection(
             name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
@@ -24,9 +23,11 @@ def get_collection():
     return _collection
 
 
-def get_embedder() -> SentenceTransformer:
+def get_embedder():
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
+
         _model = SentenceTransformer(EMBED_MODEL_NAME, trust_remote_code=True)
     return _model
 
