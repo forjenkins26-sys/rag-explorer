@@ -62,7 +62,7 @@ Swapped to Nomic's hosted embedding API instead — same model
 (`nomic-embed-text-v1.5`), same 768 dimensions, but the backend no longer
 imports torch at all. That's what made a real free-tier deploy possible.
 
-## Redeploying
+## Redeploying (already set up — quick path)
 
 **Backend (Render):** push to `main` — Render auto-deploys via the connected
 GitHub repo (`backend/render.yaml` defines the build/start commands and env
@@ -78,9 +78,77 @@ vercel deploy --prod --yes
 Variables) and gets baked into the build — changing it requires a redeploy
 to take effect.
 
+## How this was deployed from scratch
+
+Steps taken to go from local-only to the two independent, always-on URLs
+above. Useful if setting this up again on a new repo/account.
+
+**1. Push the app to its own GitHub repo.**
+This app lives at `RAG/Basic_Rag/app/` inside a much larger monorepo — Render
+and Vercel both need a clean repo to point at, so `app/` was pushed to its
+own dedicated repo (`git init` inside `app/`, new GitHub repo, push), rather
+than exposing the whole monorepo.
+
+**2. Get a Nomic API key.**
+[atlas.nomic.ai](https://atlas.nomic.ai) → sign up → Settings → API Keys →
+create a key. Free tier: 1M embedding tokens/month. This is what lets the
+backend embed documents without running torch locally.
+
+**3. Swap local embeddings for Nomic's hosted API.**
+The original build used `sentence-transformers` + torch to run
+`nomic-embed-text-v1.5` locally. That's the part that doesn't fit a free
+host — see [Why hosted embeddings, not local](#why-hosted-embeddings-not-local)
+below. Swapped `vector_store.py`'s embedding calls to `nomic.embed.text()`
+(the `nomic` pip package, authenticated via `nomic.login(NOMIC_API_KEY)`),
+same model name, same 768 dimensions. Removed `sentence-transformers`,
+`torch`, and `einops` from `requirements.txt` entirely.
+
+**4. Deploy the backend to Render.**
+- [render.com](https://render.com) → New → Web Service → connect the GitHub
+  repo from step 1.
+- Render reads `backend/render.yaml` (already in the repo) for the build
+  command (`pip install -r requirements.txt`), start command
+  (`uvicorn main:app --host 0.0.0.0 --port $PORT`), and root directory
+  (`backend/`).
+- Set env vars in the Render dashboard: `GROQ_API_KEY`, `NOMIC_API_KEY`,
+  `GROQ_MODEL` (`llama-3.3-70b-versatile`), `CORS_ORIGINS` (leave as `*`
+  until step 6, then tighten it).
+- Deploy. Note the resulting URL (`https://<service-name>.onrender.com`).
+
+**5. Deploy the frontend to Vercel.**
+```
+cd frontend
+vercel deploy --prod --yes
+```
+This creates a Vercel project from the `frontend/` folder (Vite build
+auto-detected) and gives a `*.vercel.app` URL.
+
+**6. Wire the frontend to the backend.**
+```
+vercel env add VITE_API_URL production
+# paste the Render URL from step 4 when prompted
+vercel deploy --prod --yes   # rebuild so the env var gets baked in
+```
+`frontend/src/api.js` reads `VITE_API_URL` at build time and prefixes all
+`/api/*` calls with it — this is what makes the deployed frontend talk to
+the deployed backend instead of `localhost`.
+
+**7. Tighten CORS.**
+Back in the Render dashboard, set `CORS_ORIGINS` to the real Vercel URL
+from step 5 (comma-separated if allowing more than one origin, e.g. also
+`http://localhost:5173` for local dev against the live backend). Redeploy
+the backend (or it picks it up on the next natural deploy).
+
+That's the whole path — no local machine, tunnel, or always-on process
+required afterward.
+
 ### Leftover from earlier deploy attempts
 
 - `backend/Dockerfile` + `.dockerignore` — written for a Hugging Face Spaces
   attempt (abandoned: Docker/Gradio Spaces require HF Pro, $9/mo, not
   actually free as initially assumed). Kept in case a Docker-based host is
   ever preferred over Render's native Python runtime.
+- A Cloudflare Tunnel (`cloudflared`) was used as a stopgap demo before the
+  Render+Nomic swap — exposed a local backend publicly but only while the
+  local machine and tunnel process stayed running. No longer in use; the
+  binary was gitignored (`backend/bin/`) and never committed.
