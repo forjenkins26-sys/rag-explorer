@@ -1,0 +1,95 @@
+import chromadb
+from sentence_transformers import SentenceTransformer
+
+from config import CHROMA_DIR, COLLECTION_NAME, EMBED_MODEL_NAME
+
+_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+_collection = _client.get_or_create_collection(
+    name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
+)
+
+_model: SentenceTransformer | None = None
+
+
+def get_embedder() -> SentenceTransformer:
+    global _model
+    if _model is None:
+        _model = SentenceTransformer(EMBED_MODEL_NAME, trust_remote_code=True)
+    return _model
+
+
+def embed(texts: list[str]) -> list[list[float]]:
+    return get_embedder().encode(texts, normalize_embeddings=True).tolist()
+
+
+def add_chunks(ids: list[str], texts: list[str], metadatas: list[dict]) -> None:
+    embeddings = embed(texts)
+    _collection.upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
+
+
+def query(text: str, top_k: int) -> dict:
+    embedding = embed([text])[0]
+    return _collection.query(
+        query_embeddings=[embedding],
+        n_results=top_k,
+        include=["documents", "metadatas", "distances"],
+    )
+
+
+def delete_source(source_name: str) -> None:
+    _collection.delete(where={"source": source_name})
+
+
+def list_sources() -> set[str]:
+    data = _collection.get(include=["metadatas"])
+    return {m["source"] for m in data["metadatas"]} if data["metadatas"] else set()
+
+
+def stats() -> dict:
+    data = _collection.get(include=["metadatas"])
+    metadatas = data["metadatas"] or []
+    sources = {}
+    for m in metadatas:
+        sources.setdefault(m["source"], {"chunks": 0, "pages": set()})
+        sources[m["source"]]["chunks"] += 1
+        sources[m["source"]]["pages"].add(m["page"])
+    return {
+        "total_chunks": len(metadatas),
+        "sources": {
+            name: {"chunks": v["chunks"], "pages": len(v["pages"])}
+            for name, v in sources.items()
+        },
+    }
+
+
+def embedding_dims() -> int:
+    sample = _collection.get(limit=1, include=["embeddings"])
+    embeddings = sample.get("embeddings")
+    if embeddings is not None and len(embeddings):
+        return len(embeddings[0])
+    return 0
+
+
+def sample_embedding(n: int = 8) -> list[float]:
+    sample = _collection.get(limit=1, include=["embeddings"])
+    embeddings = sample.get("embeddings")
+    if embeddings is not None and len(embeddings):
+        return [round(x, 4) for x in embeddings[0][:n]]
+    return []
+
+
+def list_chunks(limit: int = 200) -> list[dict]:
+    """All stored chunks, ordered by chunk_index, for the preview browser."""
+    data = _collection.get(limit=limit, include=["documents", "metadatas"])
+    rows = list(zip(data["documents"] or [], data["metadatas"] or []))
+    rows.sort(key=lambda r: (r[1]["source"], r[1]["chunk_index"]))
+    return [
+        {
+            "index": meta["chunk_index"],
+            "source": meta["source"],
+            "page": meta["page"],
+            "chars": len(doc),
+            "content": doc,
+        }
+        for doc, meta in rows
+    ]
