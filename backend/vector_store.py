@@ -3,12 +3,25 @@ from sentence_transformers import SentenceTransformer
 
 from config import CHROMA_DIR, COLLECTION_NAME, EMBED_MODEL_NAME
 
-_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-_collection = _client.get_or_create_collection(
-    name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
-)
-
+# Both the Chroma client and the embedding model are expensive to construct
+# (Chroma client init touches disk + telemetry; the model load can take
+# minutes on a cold host downloading weights). Neither must block module
+# import — hosts like Render kill a deploy if uvicorn doesn't bind its port
+# within a few minutes, and import happens before that bind. Lazy-init both
+# on first real use instead.
+_client = None
+_collection = None
 _model: SentenceTransformer | None = None
+
+
+def get_collection():
+    global _client, _collection
+    if _collection is None:
+        _client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+        _collection = _client.get_or_create_collection(
+            name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
+        )
+    return _collection
 
 
 def get_embedder() -> SentenceTransformer:
@@ -24,12 +37,12 @@ def embed(texts: list[str]) -> list[list[float]]:
 
 def add_chunks(ids: list[str], texts: list[str], metadatas: list[dict]) -> None:
     embeddings = embed(texts)
-    _collection.upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
+    get_collection().upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
 
 
 def query(text: str, top_k: int) -> dict:
     embedding = embed([text])[0]
-    return _collection.query(
+    return get_collection().query(
         query_embeddings=[embedding],
         n_results=top_k,
         include=["documents", "metadatas", "distances"],
@@ -37,16 +50,16 @@ def query(text: str, top_k: int) -> dict:
 
 
 def delete_source(source_name: str) -> None:
-    _collection.delete(where={"source": source_name})
+    get_collection().delete(where={"source": source_name})
 
 
 def list_sources() -> set[str]:
-    data = _collection.get(include=["metadatas"])
+    data = get_collection().get(include=["metadatas"])
     return {m["source"] for m in data["metadatas"]} if data["metadatas"] else set()
 
 
 def stats() -> dict:
-    data = _collection.get(include=["metadatas"])
+    data = get_collection().get(include=["metadatas"])
     metadatas = data["metadatas"] or []
     sources = {}
     for m in metadatas:
@@ -63,7 +76,7 @@ def stats() -> dict:
 
 
 def embedding_dims() -> int:
-    sample = _collection.get(limit=1, include=["embeddings"])
+    sample = get_collection().get(limit=1, include=["embeddings"])
     embeddings = sample.get("embeddings")
     if embeddings is not None and len(embeddings):
         return len(embeddings[0])
@@ -71,7 +84,7 @@ def embedding_dims() -> int:
 
 
 def sample_embedding(n: int = 8) -> list[float]:
-    sample = _collection.get(limit=1, include=["embeddings"])
+    sample = get_collection().get(limit=1, include=["embeddings"])
     embeddings = sample.get("embeddings")
     if embeddings is not None and len(embeddings):
         return [round(x, 4) for x in embeddings[0][:n]]
@@ -80,7 +93,7 @@ def sample_embedding(n: int = 8) -> list[float]:
 
 def list_chunks(limit: int = 200) -> list[dict]:
     """All stored chunks, ordered by chunk_index, for the preview browser."""
-    data = _collection.get(limit=limit, include=["documents", "metadatas"])
+    data = get_collection().get(limit=limit, include=["documents", "metadatas"])
     rows = list(zip(data["documents"] or [], data["metadatas"] or []))
     rows.sort(key=lambda r: (r[1]["source"], r[1]["chunk_index"]))
     return [
