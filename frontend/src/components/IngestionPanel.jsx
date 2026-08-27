@@ -36,9 +36,10 @@ export default function IngestionPanel({ status, chunks, onUpload, onReset, onDe
           </button>
           <button
             onClick={onReset}
+            title="Clear the current answer and re-read the store. Documents are not deleted — use ✕ on a source for that."
             className="rounded border border-neutral-700 px-3 py-1.5 text-xs font-semibold text-neutral-300 hover:bg-neutral-800"
           >
-            Reset
+            Refresh
           </button>
         </div>
       </div>
@@ -59,7 +60,7 @@ export default function IngestionPanel({ status, chunks, onUpload, onReset, onDe
               <button
                 onClick={() => onDelete?.(name)}
                 title={`Remove ${name}`}
-                className="opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0 rounded border border-neutral-700 px-1.5 text-[11px] text-neutral-500 hover:border-red-600 hover:text-red-400 transition"
+                className="shrink-0 rounded border border-neutral-800 px-1.5 text-[11px] text-neutral-600 hover:border-red-600 hover:text-red-400 focus:border-red-600 focus:text-red-400 transition"
               >
                 ✕
               </button>

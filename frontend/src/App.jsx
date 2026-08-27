@@ -11,6 +11,7 @@ export default function App() {
   const [queryLoading, setQueryLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [step, setStep] = useState(4); // ingested-and-stored by default once data exists
 
   async function refresh() {
@@ -32,9 +33,22 @@ export default function App() {
   async function handleUpload(file) {
     setUploading(true);
     setError("");
+    setNotice("");
     setStep(2);
     try {
-      await uploadPdf(file);
+      const res = await uploadPdf(file);
+      const ing = res?.ingested;
+      if (ing?.skipped === "duplicate") {
+        // HTTP 200 with 0 chunks: the backend deduped it. Without this the
+        // upload looks like it silently did nothing.
+        setNotice(
+          `"${ing.source}" holds the same content as "${ing.duplicate_of}" — already ingested, so it was skipped.`
+        );
+      } else if (ing) {
+        setNotice(
+          `Ingested "${ing.source}" — ${ing.chunks} chunk${ing.chunks === 1 ? "" : "s"} from ${ing.pages} section${ing.pages === 1 ? "" : "s"}.`
+        );
+      }
       setStep(4);
       await refresh();
     } catch (err) {
@@ -46,9 +60,11 @@ export default function App() {
 
   async function handleDelete(name) {
     setError("");
+    setNotice("");
     try {
-      await deleteSource(name);
+      const res = await deleteSource(name);
       setResult(null);   // stale: it may cite chunks that no longer exist
+      setNotice(`Removed "${name}" — ${res?.total_chunks ?? 0} chunks remain.`);
       await refresh();
     } catch (err) {
       setError(err.message || "Delete failed — check backend logs.");
@@ -56,7 +72,11 @@ export default function App() {
   }
 
   async function handleReset() {
+    // Clears the current answer and re-reads the store. It deliberately does
+    // NOT delete documents — use the per-source ✕ for that.
     setResult(null);
+    setNotice("");
+    setError("");
     await refresh();
   }
 
@@ -100,6 +120,10 @@ export default function App() {
 
       {error && (
         <p className="px-6 text-xs text-red-400 -mt-2 pb-2">{error}</p>
+      )}
+
+      {notice && !error && (
+        <p className="px-6 text-xs text-emerald-400 -mt-2 pb-2">{notice}</p>
       )}
 
       <main className="grid grid-cols-1 lg:grid-cols-2 gap-6 px-6 pb-8">
