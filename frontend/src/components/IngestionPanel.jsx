@@ -1,6 +1,6 @@
 import { useRef } from "react";
 
-export default function IngestionPanel({ status, chunks, onUpload, onReset, uploading }) {
+export default function IngestionPanel({ status, chunks, onUpload, onReset, onDelete, uploading }) {
   const fileRef = useRef(null);
 
   function handlePick() {
@@ -53,8 +53,16 @@ export default function IngestionPanel({ status, chunks, onUpload, onReset, uplo
       {sources.length > 0 && (
         <ul className="flex flex-col gap-1">
           {sources.map(([name]) => (
-            <li key={name} className="text-xs text-neutral-400 flex items-center gap-2">
-              <span className="text-emerald-500">▣</span> {name}
+            <li key={name} className="text-xs text-neutral-400 flex items-center gap-2 group">
+              <span className="text-emerald-500">▣</span>
+              <span className="flex-1 break-all">{name}</span>
+              <button
+                onClick={() => onDelete?.(name)}
+                title={`Remove ${name}`}
+                className="opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0 rounded border border-neutral-700 px-1.5 text-[11px] text-neutral-500 hover:border-red-600 hover:text-red-400 transition"
+              >
+                ✕
+              </button>
             </li>
           ))}
         </ul>

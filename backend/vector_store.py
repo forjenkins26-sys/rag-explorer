@@ -95,6 +95,19 @@ def list_sources() -> set[str]:
     return {m["source"] for m in data["metadatas"]} if data["metadatas"] else set()
 
 
+def find_source_by_hash(doc_hash: str) -> str | None:
+    """Filename already storing this exact content, or None.
+
+    Content-level dedup: the same document uploaded under two names (spaces vs
+    underscores, "(1)" suffixes) would otherwise be stored twice and consume two
+    of the four retrieval slots with identical text. Filename equality alone
+    cannot catch that.
+    """
+    data = get_collection().get(where={"doc_hash": doc_hash}, include=["metadatas"])
+    metadatas = data.get("metadatas") or []
+    return metadatas[0]["source"] if metadatas else None
+
+
 def stats() -> dict:
     data = get_collection().get(include=["metadatas"])
     metadatas = data["metadatas"] or []

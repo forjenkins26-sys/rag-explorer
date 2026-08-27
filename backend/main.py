@@ -75,6 +75,37 @@ def reingest():
     return {"ingested": ingest_all()}
 
 
+@app.delete("/api/source/{source_name}")
+def delete_source_route(source_name: str):
+    """Remove one document: its chunks from the store AND its file from the
+    watched folder. Deleting only the chunks would leave the file on disk for
+    the watcher to re-ingest on the next restart."""
+    # Reject any name that is not a plain filename. `Path(...).name` strips
+    # directory components, so a traversal attempt fails this equality check
+    # rather than being silently rewritten into a valid-looking path.
+    if source_name != Path(source_name).name or source_name in ("", ".", ".."):
+        raise HTTPException(400, "Invalid source name")
+
+    known = vector_store.list_sources()
+    target = PDF_DIR / source_name
+    if source_name not in known and not target.exists():
+        raise HTTPException(404, f"No such source: {source_name}")
+
+    vector_store.delete_source(source_name)
+
+    file_removed = False
+    if target.exists() and target.is_file():
+        target.unlink()
+        file_removed = True
+
+    return {
+        "deleted": source_name,
+        "file_removed": file_removed,
+        "remaining_sources": sorted(vector_store.list_sources()),
+        "total_chunks": vector_store.stats()["total_chunks"],
+    }
+
+
 @app.post("/api/upload")
 async def upload(file: UploadFile):
     ext = Path(file.filename or "").suffix.lower()

@@ -42,3 +42,14 @@ export async function uploadPdf(file) {
   }
   return res.json();
 }
+
+export async function deleteSource(name) {
+  const res = await fetch(`${BASE}/source/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || "delete failed");
+  }
+  return res.json();
+}

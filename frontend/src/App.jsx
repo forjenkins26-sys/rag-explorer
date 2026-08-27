@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getStatus, getChunks, runQuery, uploadPdf, reingest } from "./api";
+import { getStatus, getChunks, runQuery, uploadPdf, reingest, deleteSource } from "./api";
 import PipelineTracker from "./components/PipelineTracker";
 import IngestionPanel from "./components/IngestionPanel";
 import QueryPanel from "./components/QueryPanel";
@@ -41,6 +41,17 @@ export default function App() {
       setError(err.message || "Upload/ingest failed — check backend logs.");
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleDelete(name) {
+    setError("");
+    try {
+      await deleteSource(name);
+      setResult(null);   // stale: it may cite chunks that no longer exist
+      await refresh();
+    } catch (err) {
+      setError(err.message || "Delete failed — check backend logs.");
     }
   }
 
@@ -97,6 +108,7 @@ export default function App() {
           chunks={chunks}
           onUpload={handleUpload}
           onReset={handleReset}
+          onDelete={handleDelete}
           uploading={uploading}
         />
         <QueryPanel
