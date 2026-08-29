@@ -1,10 +1,12 @@
 import { useState } from "react";
 
+// Kept document-agnostic on purpose. These used to ask about "this PRD", which
+// read as nonsense the moment anything other than that one sample was ingested.
 const EXAMPLES = [
-  "What is the goal of this PRD?",
-  "Who are the target users?",
-  "What are the key features described?",
-  "What are the success metrics?",
+  "What is this document about?",
+  "Summarise the main points.",
+  "What are the key details?",
+  "List the most important facts.",
 ];
 
 export default function QueryPanel({ onSubmit, loading, result, error }) {
