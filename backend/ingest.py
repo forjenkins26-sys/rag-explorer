@@ -22,19 +22,45 @@ def _content_hash(sections: list[tuple[str, str]]) -> str:
     return hashlib.sha1(joined.encode("utf-8")).hexdigest()
 
 
+# How far back from the target size we will hunt for a word boundary. Beyond
+# this the window is honoured as-is, so one long unbroken token (a URL, a
+# base64 blob) cannot collapse a chunk to almost nothing.
+_BOUNDARY_SEARCH = 120
+
+
+def _boundary_before(text: str, index: int) -> int:
+    """Largest cut point <= index that does not land inside a word."""
+    if index >= len(text):
+        return len(text)
+    window_start = max(0, index - _BOUNDARY_SEARCH)
+    cut = text.rfind(" ", window_start, index + 1)
+    return cut if cut > window_start else index
+
+
 def _chunk_text(sections: list[tuple[str, str]]) -> list[dict]:
-    """Fixed-size sliding-window chunking over location-tagged text."""
+    """Sliding-window chunking over location-tagged text, cut on word boundaries.
+
+    A plain fixed-width slice splits words in half, so a chunk could begin
+    "d, and TestNG..." — the tail of "Cucumber". That hurts twice: the preview
+    reads as corrupted, and the embedding is computed over a fragment that
+    starts with a meaningless token.
+    """
     chunks = []
     for location, text in sections:
         if not text:
             continue
         start = 0
         while start < len(text):
-            end = start + CHUNK_SIZE
+            end = _boundary_before(text, start + CHUNK_SIZE)
             piece = text[start:end].strip()
             if piece:
                 chunks.append({"page": location, "text": piece})
-            start += CHUNK_SIZE - CHUNK_OVERLAP
+            if end >= len(text):
+                break
+            # Step back by the overlap, then align that to a word boundary too,
+            # so the next chunk also opens on a whole word.
+            nxt = _boundary_before(text, max(start + 1, end - CHUNK_OVERLAP))
+            start = nxt if nxt > start else end
     return chunks
 
 

@@ -73,21 +73,9 @@ export default function App() {
   }
 
   async function handleReset() {
-    // Full reset: the ingested documents go too, so the app returns to the
-    // state it had before anything was uploaded. That is destructive and not
-    // recoverable — a deleted document has to be uploaded again — so it is
-    // confirmed first rather than firing on a single click.
+    // Full reset with no confirmation, by request: the app returns to the state
+    // it had before anything was uploaded, so the next document starts clean.
     const count = status?.total_chunks ?? 0;
-    if (count > 0) {
-      const names = Object.keys(status?.sources ?? {});
-      const list = names.length ? "\n\n" + names.join("\n") : "";
-      const plural = names.length === 1 ? "" : "s";
-      const ok = window.confirm(
-        `Reset will permanently delete ${names.length} document${plural} and all ${count} chunks.${list}` +
-          "\n\nThis cannot be undone. Continue?"
-      );
-      if (!ok) return;
-    }
 
     setError("");
     setNotice("");
@@ -100,7 +88,7 @@ export default function App() {
       setResetKey((k) => k + 1);
       setStep(1);
       await refresh();
-      if (count > 0) setNotice("Reset — all documents removed. Ingest a document to start again.");
+      if (count > 0) setNotice("Reset — ingest a document to start again.");
     } catch (err) {
       setError(err.message || "Reset failed — check backend logs.");
     }
