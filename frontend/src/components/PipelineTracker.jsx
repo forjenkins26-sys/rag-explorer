@@ -7,19 +7,28 @@ const STEPS = [
   { label: "Answer", sub: "Groq LLM" },
 ];
 
-export default function PipelineTracker({ activeStep }) {
+export default function PipelineTracker({ activeStep, busy = false }) {
   return (
     <div className="flex items-center gap-2 overflow-x-auto px-6 py-4">
       {STEPS.map((step, i) => {
+        // The furthest step reached only pulses as "active" while work is
+        // actually running. At rest it reads "done", so a settled pipeline
+        // never looks like it is still mid-flight.
         const state =
-          activeStep > i + 1 ? "done" : activeStep === i + 1 ? "active" : "idle";
+          activeStep > i + 1
+            ? "done"
+            : activeStep === i + 1
+            ? busy
+              ? "active"
+              : "done"
+            : "idle";
         return (
           <div key={step.label} className="flex items-center gap-2 shrink-0">
             <div
               className={[
                 "flex items-center gap-2 rounded-lg border px-3 py-2 transition-colors",
                 state === "active"
-                  ? "border-emerald-500/60 bg-emerald-500/10"
+                  ? "border-emerald-500/60 bg-emerald-500/10 animate-pulse"
                   : state === "done"
                   ? "border-emerald-800 bg-emerald-950/40"
                   : "border-neutral-800 bg-neutral-900/40",

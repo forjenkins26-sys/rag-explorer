@@ -121,7 +121,7 @@ export default function App() {
         </div>
       </header>
 
-      <PipelineTracker activeStep={step} />
+      <PipelineTracker activeStep={step} busy={uploading || queryLoading} />
 
       {error && (
         <p className="px-6 text-xs text-red-400 -mt-2 pb-2">{error}</p>
