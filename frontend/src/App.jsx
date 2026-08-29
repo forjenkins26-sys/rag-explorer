@@ -12,6 +12,7 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [resetKey, setResetKey] = useState(0);
   const [step, setStep] = useState(4); // ingested-and-stored by default once data exists
 
   async function refresh() {
@@ -72,11 +73,15 @@ export default function App() {
   }
 
   async function handleReset() {
-    // Clears the current answer and re-reads the store. It deliberately does
-    // NOT delete documents — use the per-source ✕ for that.
+    // Returns the query side to its initial state and re-reads the store.
+    // The question box and "show augmented prompt" toggle are QueryPanel's own
+    // state, so bumping its key remounts it — clearing App state alone would
+    // leave the previous question sitting in the input.
+    // Ingested documents are deliberately kept; the per-source ✕ removes those.
     setResult(null);
     setNotice("");
     setError("");
+    setResetKey((k) => k + 1);
     await refresh();
   }
 
@@ -136,6 +141,7 @@ export default function App() {
           uploading={uploading}
         />
         <QueryPanel
+          key={resetKey}
           onSubmit={handleQuery}
           loading={queryLoading}
           result={result}
