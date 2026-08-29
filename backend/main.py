@@ -1,5 +1,6 @@
 import asyncio
 import re
+import secrets
 import tempfile
 from contextlib import asynccontextmanager
 
@@ -10,7 +11,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import vector_store
-from config import CHUNK_OVERLAP, CHUNK_SIZE, CORS_ORIGINS, GROQ_MODEL, PDF_DIR, TOP_K
+from config import (
+    ADMIN_TOKEN,
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    CORS_ORIGINS,
+    GROQ_MODEL,
+    PDF_DIR,
+    TOP_K,
+)
 from extractors import SUPPORTED_EXTENSIONS
 from ingest import ingest_all, ingest_pdf, sync_deleted
 from llm import generate_answer
@@ -78,6 +87,23 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     question: str
     top_k: int = TOP_K
+
+
+@app.get("/api/admin/usage")
+def admin_usage(x_admin_token: str | None = Header(default=None)):
+    """Aggregate usage counts. Requires ADMIN_TOKEN.
+
+    Returns numbers only — no owner ids, filenames, or chunk text. An owner id
+    is a bearer token in this design, so listing them here would hand out access
+    to every workspace.
+    """
+    if not ADMIN_TOKEN:
+        raise HTTPException(404, "Not found")
+    # Constant-time: a plain == leaks the secret one character at a time to
+    # anyone willing to measure how long the comparison takes.
+    if not x_admin_token or not secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
+        raise HTTPException(401, "Unauthorized")
+    return vector_store.usage()
 
 
 @app.get("/api/status")

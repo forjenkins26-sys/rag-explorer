@@ -16,6 +16,11 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 NOMIC_API_KEY = os.getenv("NOMIC_API_KEY", "")
 
+# Shared secret for /api/admin/usage. Unset means the route is disabled outright
+# rather than open: an unauthenticated usage endpoint tells anyone who asks how
+# many people use this deployment.
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
 # Comma-separated list of allowed frontend origins. Defaults to localhost dev
 # server plus wildcard so a first deploy isn't blocked before the Vercel URL
 # is known; tighten CORS_ORIGINS once the real frontend URL is set.

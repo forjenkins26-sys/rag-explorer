@@ -171,6 +171,43 @@ def stats(owner: str) -> dict:
     }
 
 
+def usage() -> dict:
+    """Aggregate counts across every owner, for the admin usage route.
+
+    This is the one function that deliberately reads past the owner filter, so
+    it returns numbers only — never a filename, never chunk text, never an owner
+    id. Those would identify people and, in the case of an id, hand over access
+    to that workspace.
+    """
+    data = get_collection().get(include=["metadatas", "documents"])
+    metadatas = data["metadatas"] or []
+    documents = data["documents"] or []
+
+    per_owner: dict[str, dict] = {}
+    for m, doc in zip(metadatas, documents):
+        owner = m.get("owner") or "__unowned__"
+        o = per_owner.setdefault(owner, {"chunks": 0, "chars": 0, "sources": set()})
+        o["chunks"] += 1
+        o["chars"] += len(doc or "")
+        o["sources"].add(m.get("source"))
+
+    visitors = {k: v for k, v in per_owner.items() if k != "__seed__"}
+    docs_per_visitor = sorted(len(v["sources"]) for v in visitors.values())
+
+    return {
+        "visitor_workspaces": len(visitors),
+        "visitors_with_documents": sum(1 for v in visitors.values() if v["sources"]),
+        "documents_total": sum(len(v["sources"]) for v in visitors.values()),
+        "chunks_total": sum(v["chunks"] for v in visitors.values()),
+        "chars_total": sum(v["chars"] for v in visitors.values()),
+        "documents_median": (
+            docs_per_visitor[len(docs_per_visitor) // 2] if docs_per_visitor else 0
+        ),
+        "documents_max": docs_per_visitor[-1] if docs_per_visitor else 0,
+        "seed_chunks": per_owner.get("__seed__", {}).get("chunks", 0),
+    }
+
+
 def embedding_dims(owner: str) -> int:
     sample = get_collection().get(where=_owned(owner), limit=1, include=["embeddings"])
     embeddings = sample.get("embeddings")
