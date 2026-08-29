@@ -8,3 +8,18 @@ body {
   margin: 0;
   font-family: system-ui, "Segoe UI", Roboto, sans-serif;
 }
+
+/* Tailwind v4's preflight sets `cursor: default` on buttons, so nothing in the
+   UI showed a hand pointer. Restore it for every interactive control, and make
+   a disabled control read as unavailable rather than merely clickable. */
+button,
+[role="button"],
+label[for],
+summary {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
