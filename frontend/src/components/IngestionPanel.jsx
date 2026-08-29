@@ -36,7 +36,7 @@ export default function IngestionPanel({ status, chunks, onUpload, onReset, onDe
           </button>
           <button
             onClick={onReset}
-            title="Clear the question, answer and retrieved chunks, then re-read the store. Ingested documents are kept — use ✕ on a source to remove one."
+            title="Start over: permanently delete every ingested document and clear the question, answer and retrieved chunks. Asks for confirmation first."
             className="rounded border border-neutral-700 px-3 py-1.5 text-xs font-semibold text-neutral-300 hover:bg-neutral-800"
           >
             Reset

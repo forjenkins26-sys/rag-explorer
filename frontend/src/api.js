@@ -53,3 +53,12 @@ export async function deleteSource(name) {
   }
   return res.json();
 }
+
+export async function clearAllSources() {
+  const res = await fetch(`${BASE}/sources`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || "clear failed");
+  }
+  return res.json();
+}

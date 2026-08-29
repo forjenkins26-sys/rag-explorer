@@ -106,6 +106,30 @@ def delete_source_route(source_name: str):
     }
 
 
+@app.delete("/api/sources")
+def clear_all_sources():
+    """Empty the store: every document's chunks AND its file in the watched
+    folder. Same reasoning as the single-source delete — leaving files on disk
+    would let the watcher re-ingest them on the next restart, so a "cleared"
+    store would silently refill."""
+    sources = sorted(vector_store.list_sources())
+
+    for name in sources:
+        vector_store.delete_source(name)
+
+    files_removed = []
+    for path in PDF_DIR.iterdir():
+        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            path.unlink()
+            files_removed.append(path.name)
+
+    return {
+        "cleared": sources,
+        "files_removed": sorted(files_removed),
+        "total_chunks": vector_store.stats()["total_chunks"],
+    }
+
+
 @app.post("/api/upload")
 async def upload(file: UploadFile):
     ext = Path(file.filename or "").suffix.lower()

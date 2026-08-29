@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getStatus, getChunks, runQuery, uploadPdf, reingest, deleteSource } from "./api";
+import { getStatus, getChunks, runQuery, uploadPdf, reingest, deleteSource, clearAllSources } from "./api";
 import PipelineTracker from "./components/PipelineTracker";
 import IngestionPanel from "./components/IngestionPanel";
 import QueryPanel from "./components/QueryPanel";
@@ -73,16 +73,37 @@ export default function App() {
   }
 
   async function handleReset() {
-    // Returns the query side to its initial state and re-reads the store.
-    // The question box and "show augmented prompt" toggle are QueryPanel's own
-    // state, so bumping its key remounts it — clearing App state alone would
-    // leave the previous question sitting in the input.
-    // Ingested documents are deliberately kept; the per-source ✕ removes those.
-    setResult(null);
-    setNotice("");
+    // Full reset: the ingested documents go too, so the app returns to the
+    // state it had before anything was uploaded. That is destructive and not
+    // recoverable — a deleted document has to be uploaded again — so it is
+    // confirmed first rather than firing on a single click.
+    const count = status?.total_chunks ?? 0;
+    if (count > 0) {
+      const names = Object.keys(status?.sources ?? {});
+      const list = names.length ? "\n\n" + names.join("\n") : "";
+      const plural = names.length === 1 ? "" : "s";
+      const ok = window.confirm(
+        `Reset will permanently delete ${names.length} document${plural} and all ${count} chunks.${list}` +
+          "\n\nThis cannot be undone. Continue?"
+      );
+      if (!ok) return;
+    }
+
     setError("");
-    setResetKey((k) => k + 1);
-    await refresh();
+    setNotice("");
+    try {
+      if (count > 0) await clearAllSources();
+      setResult(null);
+      // The question box and prompt toggle are QueryPanel's own state, so
+      // bumping its key remounts it — clearing App state alone would leave the
+      // previous question sitting in the input.
+      setResetKey((k) => k + 1);
+      setStep(1);
+      await refresh();
+      if (count > 0) setNotice("Reset — all documents removed. Ingest a document to start again.");
+    } catch (err) {
+      setError(err.message || "Reset failed — check backend logs.");
+    }
   }
 
   async function handleQuery(question) {
