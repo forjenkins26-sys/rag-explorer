@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import vector_store
-from config import CORS_ORIGINS, GROQ_MODEL, PDF_DIR, TOP_K
+from config import CHUNK_OVERLAP, CHUNK_SIZE, CORS_ORIGINS, GROQ_MODEL, PDF_DIR, TOP_K
 from extractors import SUPPORTED_EXTENSIONS
 from ingest import ingest_all, ingest_pdf, sync_deleted
 from llm import generate_answer
@@ -59,6 +59,9 @@ def status():
         "vector_db": "ChromaDB (local, persistent)",
         "pdf_folder": str(PDF_DIR),
         "total_chunks": s["total_chunks"],
+        "total_chars": s["total_chars"],
+        "chunk_size": CHUNK_SIZE,
+        "chunk_overlap": CHUNK_OVERLAP,
         "embedding_dims": vector_store.embedding_dims(),
         "sample_embedding": vector_store.sample_embedding(),
         "sources": s["sources"],

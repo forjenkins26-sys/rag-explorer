@@ -109,17 +109,23 @@ def find_source_by_hash(doc_hash: str) -> str | None:
 
 
 def stats() -> dict:
-    data = get_collection().get(include=["metadatas"])
+    # Documents come back alongside metadata so the character total is derived
+    # from what is actually stored, rather than a counter kept in parallel that
+    # would drift on every delete or re-ingest.
+    data = get_collection().get(include=["metadatas", "documents"])
     metadatas = data["metadatas"] or []
+    documents = data["documents"] or []
     sources = {}
-    for m in metadatas:
-        sources.setdefault(m["source"], {"chunks": 0, "pages": set()})
-        sources[m["source"]]["chunks"] += 1
-        sources[m["source"]]["pages"].add(m["page"])
+    for m, doc in zip(metadatas, documents):
+        s = sources.setdefault(m["source"], {"chunks": 0, "pages": set(), "chars": 0})
+        s["chunks"] += 1
+        s["pages"].add(m["page"])
+        s["chars"] += len(doc or "")
     return {
         "total_chunks": len(metadatas),
+        "total_chars": sum(len(d or "") for d in documents),
         "sources": {
-            name: {"chunks": v["chunks"], "pages": len(v["pages"])}
+            name: {"chunks": v["chunks"], "pages": len(v["pages"]), "chars": v["chars"]}
             for name, v in sources.items()
         },
     }

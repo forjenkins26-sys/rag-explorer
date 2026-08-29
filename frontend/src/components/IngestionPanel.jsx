@@ -69,14 +69,21 @@ export default function IngestionPanel({ status, chunks, onUpload, onReset, onDe
         </ul>
       )}
 
-      <div className="grid grid-cols-4 gap-2">
+      {/* "Stored" used to repeat the chunk count. These five say something
+          different each: how much text came in, how it was cut, and what came
+          out — which is the part a viewer is here to understand. */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <StatTile
+          value={(status?.total_chars ?? 0).toLocaleString()}
+          label="Characters"
+        />
         <StatTile
           value={sources.reduce((sum, [, v]) => sum + v.pages, 0)}
           label="Pages"
         />
         <StatTile value={status?.total_chunks ?? 0} label="Chunks" />
-        <StatTile value={status?.embedding_dims ?? 0} label="Embed dims" />
-        <StatTile value={status?.total_chunks ?? 0} label="Stored" />
+        <StatTile value={status?.chunk_size ?? 0} label="Chunk size" />
+        <StatTile value={status?.chunk_overlap ?? 0} label="Overlap" />
       </div>
 
       {status?.sample_embedding?.length > 0 && (
