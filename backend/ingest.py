@@ -64,10 +64,12 @@ def _chunk_text(sections: list[tuple[str, str]]) -> list[dict]:
     return chunks
 
 
-def ingest_pdf(doc_path: Path) -> dict:
-    """Read, chunk, embed, and store one document. Idempotent per filename AND
-    per content. Despite the name, handles any type in SUPPORTED_EXTENSIONS
-    (pdf/txt/md/xlsx/xls)."""
+def ingest_pdf(doc_path: Path, owner: str) -> dict:
+    """Read, chunk, embed, and store one document for one owner. Idempotent per
+    filename AND per content. Despite the name, handles any type in
+    SUPPORTED_EXTENSIONS (pdf/txt/md/xlsx/xls)."""
+    if not owner:
+        raise ValueError("owner is required to ingest")
     source_name = doc_path.name
 
     # Extract and hash BEFORE deleting anything. The old chunks are the only
@@ -79,8 +81,9 @@ def ingest_pdf(doc_path: Path) -> dict:
 
     # Same bytes already stored under a different filename? Keep the original.
     # Two names for one document would otherwise consume two of the four
-    # retrieval slots with identical text.
-    existing = find_source_by_hash(doc_hash)
+    # retrieval slots with identical text. Scoped to this owner, so one
+    # visitor's upload is never matched against another's document.
+    existing = find_source_by_hash(doc_hash, owner)
     if existing is not None and existing != source_name:
         return {
             "source": source_name,
@@ -90,16 +93,20 @@ def ingest_pdf(doc_path: Path) -> dict:
             "duplicate_of": existing,
         }
 
-    delete_source(source_name)  # re-ingest cleanly if the file itself changed
+    delete_source(source_name, owner)  # re-ingest cleanly if the file changed
     chunks = _chunk_text(sections)
 
     ids, texts, metadatas = [], [], []
     for idx, chunk in enumerate(chunks):
-        chunk_id = hashlib.sha1(f"{source_name}:{idx}".encode()).hexdigest()[:16]
+        # The owner is part of the id: two visitors uploading the same filename
+        # would otherwise generate identical ids and silently overwrite each
+        # other's chunks, since upsert matches on id alone.
+        chunk_id = hashlib.sha1(f"{owner}:{source_name}:{idx}".encode()).hexdigest()[:16]
         ids.append(chunk_id)
         texts.append(chunk["text"])
         metadatas.append(
             {
+                "owner": owner,
                 "source": source_name,
                 "page": chunk["page"],
                 "chunk_index": idx,
@@ -117,18 +124,24 @@ def ingest_pdf(doc_path: Path) -> dict:
     }
 
 
-def ingest_all() -> list[dict]:
+def ingest_all(owner: str) -> list[dict]:
+    """Ingest every supported file in the shared seed folder for one owner."""
     from config import PDF_DIR
 
     results = []
     for doc_path in sorted(PDF_DIR.iterdir()):
         if doc_path.is_file() and doc_path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            results.append(ingest_pdf(doc_path))
+            results.append(ingest_pdf(doc_path, owner))
     return results
 
 
-def sync_deleted():
-    """Drop chunks for documents no longer present in data/pdf."""
+def sync_deleted(owner: str):
+    """Drop this owner's chunks for documents no longer present in data/pdf.
+
+    Only meaningful for the seed owner, whose documents live on disk. A visitor's
+    uploads are written to that same folder, so this is called for the seed owner
+    alone — see main.py.
+    """
     from config import PDF_DIR
 
     on_disk = {
@@ -136,6 +149,6 @@ def sync_deleted():
         for p in PDF_DIR.iterdir()
         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
     }
-    for source in list_sources():
+    for source in list_sources(owner):
         if source not in on_disk:
-            delete_source(source)
+            delete_source(source, owner)

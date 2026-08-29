@@ -9,15 +9,21 @@ from config import PDF_DIR
 from extractors import SUPPORTED_EXTENSIONS
 from ingest import ingest_pdf, sync_deleted
 
+# The watched folder holds the shared seed corpus — documents committed with the
+# repo that every visitor can read. Anything appearing here is ingested for that
+# pseudo-owner, never for a visitor: a file on the server's disk has no visitor
+# attached to it. Visitor uploads go through /api/upload into a temp dir instead.
+SEED_OWNER = "__seed__"
+
 
 class DocHandler(FileSystemEventHandler):
     def _maybe_ingest(self, path: str):
         if Path(path).suffix.lower() in SUPPORTED_EXTENSIONS:
             time.sleep(0.5)  # let the OS finish writing the file
-            print(f"[watcher] ingesting {path}")
+            print(f"[watcher] ingesting {path} for the seed corpus")
             target = PDF_DIR / Path(path).name
             if target.exists():
-                ingest_pdf(target)
+                ingest_pdf(target, SEED_OWNER)
 
     def on_created(self, event):
         if not event.is_directory:
@@ -29,7 +35,7 @@ class DocHandler(FileSystemEventHandler):
 
     def on_deleted(self, event):
         if not event.is_directory:
-            sync_deleted()
+            sync_deleted(SEED_OWNER)
 
 
 def start_watcher():

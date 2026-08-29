@@ -72,47 +72,87 @@ def embed_query(text: str) -> list[float]:
     return _embed([text], task_type="search_query")[0]
 
 
+# --- per-visitor isolation -------------------------------------------------
+#
+# Every chunk carries an `owner`, and every read and delete is filtered by it.
+# `owner` is a REQUIRED argument on each of these functions rather than an
+# optional one: an optional parameter that someone forgets to pass silently
+# returns the whole store, which is precisely the leak this exists to prevent.
+#
+# This is isolation, not authentication. An owner id is a bearer token in all
+# but name — anyone who learns another visitor's id can read that visitor's
+# documents. It keeps strangers' uploads apart on a shared demo; it is not a
+# place for anything genuinely sensitive.
+
+
+def _owned(owner: str, extra: dict | None = None) -> dict:
+    """Chroma `where` clause scoping a query to one owner.
+
+    Raises on a falsy owner instead of returning an unfiltered clause, so a
+    missing id can never widen into "match everything".
+    """
+    if not owner or not isinstance(owner, str):
+        raise ValueError("owner is required for every store operation")
+    if extra:
+        return {"$and": [{"owner": owner}, extra]}
+    return {"owner": owner}
+
+
 def add_chunks(ids: list[str], texts: list[str], metadatas: list[dict]) -> None:
+    if not all(m.get("owner") for m in metadatas):
+        raise ValueError("every chunk must carry an owner")
     embeddings = embed_documents(texts)
     get_collection().upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
 
 
-def query(text: str, top_k: int) -> dict:
+def query(text: str, top_k: int, owner: str) -> dict:
     embedding = embed_query(text)
     return get_collection().query(
         query_embeddings=[embedding],
         n_results=top_k,
+        where=_owned(owner),
         include=["documents", "metadatas", "distances"],
     )
 
 
-def delete_source(source_name: str) -> None:
-    get_collection().delete(where={"source": source_name})
+def delete_source(source_name: str, owner: str) -> None:
+    get_collection().delete(where=_owned(owner, {"source": source_name}))
 
 
-def list_sources() -> set[str]:
-    data = get_collection().get(include=["metadatas"])
+def delete_owner(owner: str) -> None:
+    """Drop everything belonging to one visitor."""
+    get_collection().delete(where=_owned(owner))
+
+
+def list_sources(owner: str) -> set[str]:
+    data = get_collection().get(where=_owned(owner), include=["metadatas"])
     return {m["source"] for m in data["metadatas"]} if data["metadatas"] else set()
 
 
-def find_source_by_hash(doc_hash: str) -> str | None:
-    """Filename already storing this exact content, or None.
+def find_source_by_hash(doc_hash: str, owner: str) -> str | None:
+    """Filename already storing this exact content **for this owner**, or None.
 
     Content-level dedup: the same document uploaded under two names (spaces vs
     underscores, "(1)" suffixes) would otherwise be stored twice and consume two
     of the four retrieval slots with identical text. Filename equality alone
     cannot catch that.
+
+    Scoped per owner deliberately — one visitor uploading a file must not be
+    told it is a duplicate of a document belonging to somebody else, which would
+    leak that person's filename.
     """
-    data = get_collection().get(where={"doc_hash": doc_hash}, include=["metadatas"])
+    data = get_collection().get(
+        where=_owned(owner, {"doc_hash": doc_hash}), include=["metadatas"]
+    )
     metadatas = data.get("metadatas") or []
     return metadatas[0]["source"] if metadatas else None
 
 
-def stats() -> dict:
+def stats(owner: str) -> dict:
     # Documents come back alongside metadata so the character total is derived
     # from what is actually stored, rather than a counter kept in parallel that
     # would drift on every delete or re-ingest.
-    data = get_collection().get(include=["metadatas", "documents"])
+    data = get_collection().get(where=_owned(owner), include=["metadatas", "documents"])
     metadatas = data["metadatas"] or []
     documents = data["documents"] or []
     sources = {}
@@ -131,25 +171,27 @@ def stats() -> dict:
     }
 
 
-def embedding_dims() -> int:
-    sample = get_collection().get(limit=1, include=["embeddings"])
+def embedding_dims(owner: str) -> int:
+    sample = get_collection().get(where=_owned(owner), limit=1, include=["embeddings"])
     embeddings = sample.get("embeddings")
     if embeddings is not None and len(embeddings):
         return len(embeddings[0])
     return 0
 
 
-def sample_embedding(n: int = 8) -> list[float]:
-    sample = get_collection().get(limit=1, include=["embeddings"])
+def sample_embedding(owner: str, n: int = 8) -> list[float]:
+    sample = get_collection().get(where=_owned(owner), limit=1, include=["embeddings"])
     embeddings = sample.get("embeddings")
     if embeddings is not None and len(embeddings):
         return [round(x, 4) for x in embeddings[0][:n]]
     return []
 
 
-def list_chunks(limit: int = 200) -> list[dict]:
-    """All stored chunks, ordered by chunk_index, for the preview browser."""
-    data = get_collection().get(limit=limit, include=["documents", "metadatas"])
+def list_chunks(owner: str, limit: int = 200) -> list[dict]:
+    """This owner's stored chunks, ordered by chunk_index, for the preview browser."""
+    data = get_collection().get(
+        where=_owned(owner), limit=limit, include=["documents", "metadatas"]
+    )
     rows = list(zip(data["documents"] or [], data["metadatas"] or []))
     rows.sort(key=lambda r: (r[1]["source"], r[1]["chunk_index"]))
     return [

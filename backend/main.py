@@ -1,9 +1,11 @@
 import asyncio
+import re
+import tempfile
 from contextlib import asynccontextmanager
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -13,6 +15,35 @@ from extractors import SUPPORTED_EXTENSIONS
 from ingest import ingest_all, ingest_pdf, sync_deleted
 from llm import generate_answer
 from watcher import start_watcher
+
+# Documents committed under data/pdf/ belong to this pseudo-owner. They are the
+# demo's shared seed corpus: every visitor can read them, nobody can delete
+# them, and they survive the ephemeral disk because they ship with the repo.
+SEED_OWNER = "__seed__"
+
+# A visitor id is opaque to us — the browser generates it. Constrain the shape
+# anyway: it lands in Chroma metadata and in chunk-id hashes, so anything
+# unbounded is an injection surface rather than an identifier.
+_VISITOR_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def visitor(x_visitor_id: str | None = Header(default=None)) -> str:
+    """The calling visitor's store id, taken from the X-Visitor-Id header.
+
+    A missing or malformed header is rejected outright rather than falling back
+    to a shared bucket. A default here would mean every visitor without an id
+    sharing one store — the exact leak this design exists to prevent.
+    """
+    if not x_visitor_id or not _VISITOR_ID.match(x_visitor_id):
+        raise HTTPException(
+            400,
+            "Missing or malformed X-Visitor-Id header. The browser sends this "
+            "automatically; if you are calling the API directly, supply 8-64 "
+            "characters of [A-Za-z0-9_-].",
+        )
+    if x_visitor_id == SEED_OWNER:
+        raise HTTPException(400, "Reserved visitor id")
+    return x_visitor_id
 
 
 @asynccontextmanager
@@ -26,7 +57,7 @@ async def lifespan(app: FastAPI):
 
 
 def _startup_ingest():
-    ingest_all()
+    ingest_all(SEED_OWNER)
     global _watcher_observer
     _watcher_observer = start_watcher()
 
@@ -50,91 +81,81 @@ class QueryRequest(BaseModel):
 
 
 @app.get("/api/status")
-def status():
-    sync_deleted()
-    s = vector_store.stats()
+def status(owner: str = Depends(visitor)):
+    # Only the seed corpus lives on disk, so only it can fall out of sync with
+    # the folder. A visitor's uploads are held in a temp dir that is deleted as
+    # soon as ingestion finishes.
+    sync_deleted(SEED_OWNER)
+    s = vector_store.stats(owner)
     return {
         "embedding_model": "nomic-embed-text-v1.5",
         "llm_model": GROQ_MODEL,
         "vector_db": "ChromaDB (local, persistent)",
-        "pdf_folder": str(PDF_DIR),
+        "pdf_folder": "your private workspace",
         "total_chunks": s["total_chunks"],
         "total_chars": s["total_chars"],
         "chunk_size": CHUNK_SIZE,
         "chunk_overlap": CHUNK_OVERLAP,
-        "embedding_dims": vector_store.embedding_dims(),
-        "sample_embedding": vector_store.sample_embedding(),
+        "embedding_dims": vector_store.embedding_dims(owner),
+        "sample_embedding": vector_store.sample_embedding(owner),
         "sources": s["sources"],
     }
 
 
 @app.get("/api/chunks")
-def chunks():
-    return {"chunks": vector_store.list_chunks()}
+def chunks(owner: str = Depends(visitor)):
+    return {"chunks": vector_store.list_chunks(owner)}
 
 
 @app.post("/api/reingest")
-def reingest():
-    return {"ingested": ingest_all()}
+def reingest(owner: str = Depends(visitor)):
+    """Copy the shared seed corpus into this visitor's workspace."""
+    return {"ingested": ingest_all(owner)}
 
 
 @app.delete("/api/source/{source_name}")
-def delete_source_route(source_name: str):
-    """Remove one document: its chunks from the store AND its file from the
-    watched folder. Deleting only the chunks would leave the file on disk for
-    the watcher to re-ingest on the next restart."""
+def delete_source_route(source_name: str, owner: str = Depends(visitor)):
+    """Remove one of this visitor's documents.
+
+    Only the caller's chunks are touched. Nothing is deleted from disk: the
+    watched folder holds the shared seed corpus, and one visitor must not be
+    able to remove a document every other visitor can see.
+    """
     # Reject any name that is not a plain filename. `Path(...).name` strips
     # directory components, so a traversal attempt fails this equality check
     # rather than being silently rewritten into a valid-looking path.
     if source_name != Path(source_name).name or source_name in ("", ".", ".."):
         raise HTTPException(400, "Invalid source name")
 
-    known = vector_store.list_sources()
-    target = PDF_DIR / source_name
-    if source_name not in known and not target.exists():
+    if source_name not in vector_store.list_sources(owner):
         raise HTTPException(404, f"No such source: {source_name}")
 
-    vector_store.delete_source(source_name)
-
-    file_removed = False
-    if target.exists() and target.is_file():
-        target.unlink()
-        file_removed = True
+    vector_store.delete_source(source_name, owner)
 
     return {
         "deleted": source_name,
-        "file_removed": file_removed,
-        "remaining_sources": sorted(vector_store.list_sources()),
-        "total_chunks": vector_store.stats()["total_chunks"],
+        "file_removed": False,
+        "remaining_sources": sorted(vector_store.list_sources(owner)),
+        "total_chunks": vector_store.stats(owner)["total_chunks"],
     }
 
 
 @app.delete("/api/sources")
-def clear_all_sources():
-    """Empty the store: every document's chunks AND its file in the watched
-    folder. Same reasoning as the single-source delete — leaving files on disk
-    would let the watcher re-ingest them on the next restart, so a "cleared"
-    store would silently refill."""
-    sources = sorted(vector_store.list_sources())
-
-    for name in sources:
-        vector_store.delete_source(name)
-
-    files_removed = []
-    for path in PDF_DIR.iterdir():
-        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            path.unlink()
-            files_removed.append(path.name)
+def clear_all_sources(owner: str = Depends(visitor)):
+    """Empty this visitor's workspace. Other visitors and the shared seed
+    corpus on disk are untouched."""
+    sources = sorted(vector_store.list_sources(owner))
+    vector_store.delete_owner(owner)
 
     return {
         "cleared": sources,
-        "files_removed": sorted(files_removed),
-        "total_chunks": vector_store.stats()["total_chunks"],
+        "files_removed": [],
+        "total_chunks": vector_store.stats(owner)["total_chunks"],
     }
 
 
 @app.post("/api/upload")
-async def upload(file: UploadFile):
+async def upload(file: UploadFile, owner: str = Depends(visitor)):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
@@ -143,17 +164,22 @@ async def upload(file: UploadFile):
         )
 
     # Filename is used only as a display label; the file is always written
-    # under a fixed, sanitized name inside PDF_DIR — no path traversal risk.
+    # under a fixed, sanitized name — no path traversal risk.
     safe_name = "".join(c for c in file.filename if c.isalnum() or c in " ._-()") or f"upload{ext}"
-    dest = PDF_DIR / safe_name
-    dest.write_bytes(await file.read())
-    result = ingest_pdf(dest)
+
+    # Written to a temp dir, never PDF_DIR. A visitor's upload landing in the
+    # watched folder would be picked up by the observer and ingested for the
+    # seed corpus, making it visible to everybody.
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / safe_name
+        dest.write_bytes(await file.read())
+        result = ingest_pdf(dest, owner)
     return {"ingested": result}
 
 
 @app.post("/api/query")
-def query(req: QueryRequest):
-    result = vector_store.query(req.question, req.top_k)
+def query(req: QueryRequest, owner: str = Depends(visitor)):
+    result = vector_store.query(req.question, req.top_k, owner)
 
     docs = result["documents"][0] if result["documents"] else []
     metas = result["metadatas"][0] if result["metadatas"] else []
