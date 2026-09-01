@@ -23,7 +23,7 @@ export default function IngestionPanel({ status, chunks, onUpload, onReset, onDe
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.txt,.md,.xlsx,.xls"
+            accept=".pdf,.txt,.md,.xlsx,.xls,.csv"
             className="hidden"
             onChange={handleFileChange}
           />
@@ -48,7 +48,7 @@ export default function IngestionPanel({ status, chunks, onUpload, onReset, onDe
         Source folder: {status?.pdf_folder}
       </p>
       <p className="text-xs text-neutral-600">
-        Supported: PDF, TXT, Markdown, Excel (.xlsx/.xls)
+        Supported: PDF, TXT, Markdown, Excel (.xlsx/.xls), CSV
       </p>
 
       {sources.length > 0 && (

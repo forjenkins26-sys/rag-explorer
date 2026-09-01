@@ -67,7 +67,7 @@ def _chunk_text(sections: list[tuple[str, str]]) -> list[dict]:
 def ingest_pdf(doc_path: Path, owner: str) -> dict:
     """Read, chunk, embed, and store one document for one owner. Idempotent per
     filename AND per content. Despite the name, handles any type in
-    SUPPORTED_EXTENSIONS (pdf/txt/md/xlsx/xls)."""
+    SUPPORTED_EXTENSIONS (pdf/txt/md/xlsx/xls/csv)."""
     if not owner:
         raise ValueError("owner is required to ingest")
     source_name = doc_path.name

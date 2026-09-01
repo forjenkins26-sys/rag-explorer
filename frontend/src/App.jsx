@@ -119,7 +119,7 @@ export default function App() {
           <div>
             <h1 className="text-base font-semibold leading-tight">RAG Explorer</h1>
             <p className="text-xs text-neutral-500">
-              Doc (PDF/TXT/MD/Excel) &rarr; chunk &rarr; Nomic embed &rarr; ChromaDB &rarr; retrieve top-4 &rarr; Groq answer
+              Doc (PDF/TXT/MD/Excel/CSV) &rarr; chunk &rarr; Nomic embed &rarr; ChromaDB &rarr; retrieve top-4 &rarr; Groq answer
             </p>
           </div>
         </div>

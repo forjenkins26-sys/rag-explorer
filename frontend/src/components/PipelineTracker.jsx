@@ -4,7 +4,7 @@
 // it into two rows breaks the sequence. A single row with a rule between the
 // phases keeps the flow readable and still says which half is which.
 const STEPS = [
-  { n: 1, label: "Document", sub: "PDF · TXT · MD · Excel" },
+  { n: 1, label: "Document", sub: "PDF · TXT · MD · Excel · CSV" },
   { n: 2, label: "Chunk", sub: "split on word boundaries" },
   { n: 3, label: "Embed", sub: "Nomic vectors" },
   { n: 4, label: "Store", sub: "ChromaDB" },
